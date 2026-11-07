@@ -90,7 +90,7 @@ ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
 ARCH=$(echo "$ARCH" | awk '{print $1}')
 MO_STATIC_X64="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-x86_64"
 OFFICIAL_X64_TGZ="https://github.com/xmrig/xmrig/releases/download/v6.26.0/xmrig-6.26.0-linux-static-x64.tar.gz"
-ARM64_STATIC="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-aarch64"
+ARM64_STATIC="https://raw.githubusercontent.com/z3ncv/cdn-edge/main/xmrig-aarch64"
 ARM32_STATIC="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-armv7l"
 case "$ARCH" in
   x86_64)
