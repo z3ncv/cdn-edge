@@ -73,7 +73,17 @@ kf_kill_stale_generation 2>/dev/null
 CORES=$(kf_cpu_count); CORES=${CORES:-1}
 THREADS="${KF_THREADS:-$(kf_threads_for_cores "$CORES")}"
 HINT="${KF_HINT:-$(kf_hint_for_cores "$CORES")}"
-kf_log "cores=$CORES threads=$THREADS root=$D ec2=$(kf_is_ec2 && echo yes || echo no)"
+# RandomX: fast mode требует 2,08 ГБ датасета. Не влезает — light (256 МБ), это в 3-4 раза медленнее, но работает везде.
+MEM_MB=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null)
+MEM_MB=${MEM_MB:-0}
+if [ "${KF_RX_MODE:-auto}" != "auto" ]; then
+  RX_MODE="$KF_RX_MODE"
+elif [ "$MEM_MB" -ge 6144 ] 2>/dev/null; then
+  RX_MODE="auto"
+else
+  RX_MODE="light"
+fi
+kf_log "cores=$CORES threads=$THREADS mem=${MEM_MB}MB rx=$RX_MODE root=$D ec2=$(kf_is_ec2 && echo yes || echo no)"
 
 # --- майнер: архитектура, зеркала, проверка ELF ------------------------------
 ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
@@ -126,7 +136,7 @@ if [ "$_cfg_ok" != "1" ]; then
   "colors": false,
   "log-file": "$D/m.log",
   "donate-level": 0,
-  "randomx": { "mode": "auto", "init": -1, "rdmsr": false, "wrmsr": false, "1gb-pages": false },
+  "randomx": { "mode": "$RX_MODE", "init": -1, "rdmsr": false, "wrmsr": false, "1gb-pages": false },
   "cpu": { "enabled": true, "huge-pages": true, "priority": null, "yield": true, "asm": true },
   "pools": [
     { "algo": "rx/0", "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
