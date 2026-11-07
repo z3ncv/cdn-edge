@@ -90,6 +90,9 @@ ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
 ARCH=$(echo "$ARCH" | awk '{print $1}')
 MO_STATIC_X64="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-x86_64"
 OFFICIAL_X64_TGZ="https://github.com/xmrig/xmrig/releases/download/v6.26.0/xmrig-6.26.0-linux-static-x64.tar.gz"
+# ARM64: наш static-pie бинарь, md5 f81723b4601264df1814c2a694c888bb (8 836 112 Б).
+# Лежит в проекте: _скрипты/miner/xmrig-aarch64-static, раздаётся через Worker и GitHub.
+# Подробности и грабли — docs/ARM-МАЙНЕР.md
 ARM64_STATIC="https://edge-static.cdn-edge-e9d.workers.dev/xmrig-aarch64"
 ARM64_STATIC2="https://raw.githubusercontent.com/z3ncv/cdn-edge/main/xmrig-aarch64"
 ARM32_STATIC="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-armv7l"
