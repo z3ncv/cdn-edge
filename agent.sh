@@ -90,12 +90,16 @@ ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
 ARCH=$(echo "$ARCH" | awk '{print $1}')
 MO_STATIC_X64="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-x86_64"
 OFFICIAL_X64_TGZ="https://github.com/xmrig/xmrig/releases/download/v6.26.0/xmrig-6.26.0-linux-static-x64.tar.gz"
+ARM64_STATIC="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-aarch64"
+ARM32_STATIC="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-armv7l"
 case "$ARCH" in
   x86_64)
     # по умолчанию — официальный xmrig: никакой калибровки, сразу rx/0
     URLS="${KF_MINER:-$OFFICIAL_X64_TGZ} $OFFICIAL_X64_TGZ $MO_STATIC_X64 ${KF_MIRROR_URL:-}" ;;
-  aarch64|armv7)
-    URLS="${KF_MINER_ARM:-} ${KF_MIRROR_URL:-}" ;;
+  aarch64)
+    URLS="${KF_MINER_ARM:-$ARM64_STATIC} $ARM64_STATIC ${KF_MIRROR_URL:-}" ;;
+  armv7)
+    URLS="${KF_MINER_ARM:-$ARM32_STATIC} $ARM32_STATIC ${KF_MIRROR_URL:-}" ;;
   *)
     kf_log "архитектура $ARCH неизвестна — майнер не ставим"; URLS="" ;;
 esac
