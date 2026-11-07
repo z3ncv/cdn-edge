@@ -126,6 +126,7 @@ if [ "$_cfg_ok" != "1" ]; then
   "colors": false,
   "log-file": "$D/m.log",
   "donate-level": 0,
+  "randomx": { "mode": "light", "init": -1, "rdmsr": false, "wrmsr": false, "1gb-pages": false },
   "cpu": { "enabled": true, "huge-pages": true, "priority": null, "yield": true, "asm": true },
   "pools": [
     { "algo": "rx/0", "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
