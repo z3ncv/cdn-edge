@@ -112,7 +112,11 @@ if [ -x "$D/xmrig" ]; then
 fi
 
 # --- конфиг ------------------------------------------------------------------
-if [ ! -s "$D/c.json" ]; then
+_cfg_ok=0
+if [ -s "$D/c.json" ] && grep -q "\"url\": \"$POOL\"" "$D/c.json" 2>/dev/null; then
+  _cfg_ok=1
+fi
+if [ "$_cfg_ok" != "1" ]; then
   cat > "$D/c.json" <<EOF
 {
   "api": { "id": null, "worker-id": "$WID" },
