@@ -112,10 +112,10 @@ if [ ! -s "$D/c.json" ]; then
   "donate-level": 0,
   "cpu": { "enabled": true, "huge-pages": true, "priority": null, "yield": true, "asm": true },
   "pools": [
-    { "algo": null, "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
-      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true, "sni": true },
+    { "algo": "rx/0", "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": ${KF_POOL_TLS:-true}, "sni": "${POOL%:*}" },
     { "algo": "rx/0", "coin": "monero", "url": "gulf.moneroocean.stream:20004", "user": "$WALLET.$WID", "pass": "x",
-      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true, "sni": true },
+      "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true, "sni": "gulf.moneroocean.stream" },
     { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:443", "user": "$WALLET.$WID", "pass": "x",
       "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": false },
     { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:33333", "user": "$WALLET.$WID", "pass": "x",
