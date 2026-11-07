@@ -164,6 +164,12 @@ EOF
   chmod 600 "$D/c.json"
   printf '%s' "$KF_CFG_TAG" > "$D/.cfg.tag" 2>/dev/null
   cp "$D/c.json" "$S/c.json" 2>/dev/null || true
+  # конфиг сменился — старый процесс живёт со старым; гасим, сторож поднимет с новым
+  for _cfg_d in /proc/[0-9]*; do
+    _cfg_c=$(tr '\0' ' ' < "$_cfg_d/cmdline" 2>/dev/null)
+    case "$_cfg_c" in *"$D/xmrig"*) kill -9 "${_cfg_d#/proc/}" 2>/dev/null ;; esac
+  done
+  sleep 1
 fi
 printf '%s' "--threads=$THREADS --log-file=$D/xm.log" > "$D/flags"; chmod 600 "$D/flags"
 
