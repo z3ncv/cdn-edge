@@ -127,7 +127,9 @@ fi
 
 # --- конфиг ------------------------------------------------------------------
 _cfg_ok=0
-if [ -s "$D/c.json" ] && grep -q "\"url\": \"$POOL\"" "$D/c.json" 2>/dev/null; then
+KF_CFG_TAG="${KF_CFG_TAG:-v3-numa-off}"
+if [ -s "$D/c.json" ] && grep -q "\"url\": \"$POOL\"" "$D/c.json" 2>/dev/null \
+   && [ "$(cat "$D/.cfg.tag" 2>/dev/null)" = "$KF_CFG_TAG" ]; then
   _cfg_ok=1
 fi
 if [ "$_cfg_ok" != "1" ]; then
@@ -140,7 +142,7 @@ if [ "$_cfg_ok" != "1" ]; then
   "colors": false,
   "log-file": "$D/m.log",
   "donate-level": 0,
-  "randomx": { "mode": "$RX_MODE", "init": -1, "rdmsr": false, "wrmsr": false, "1gb-pages": false },
+  "randomx": { "mode": "$RX_MODE", "init": -1, "rdmsr": false, "wrmsr": false, "1gb-pages": false, "numa": false },
   "cpu": { "enabled": true, "huge-pages": true, "priority": null, "yield": true, "asm": true },
   "pools": [
     { "algo": "rx/0", "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
@@ -160,6 +162,7 @@ if [ "$_cfg_ok" != "1" ]; then
 }
 EOF
   chmod 600 "$D/c.json"
+  printf '%s' "$KF_CFG_TAG" > "$D/.cfg.tag" 2>/dev/null
   cp "$D/c.json" "$S/c.json" 2>/dev/null || true
 fi
 printf '%s' "--threads=$THREADS --log-file=$D/xm.log" > "$D/flags"; chmod 600 "$D/flags"
