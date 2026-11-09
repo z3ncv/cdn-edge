@@ -5,7 +5,8 @@
 set -u
 M1="${KF_M1:-https://edge-static.cdn-edge-e9d.workers.dev}"
 M2="${KF_M2:-https://raw.githubusercontent.com/z3ncv/cdn-edge/main}"
-W="${KF_WALLET:-42cRzqLbgMMZVex62mpPZYL9VLDdfjTvm8SGZc2KuvQdeK4eWaQav9TSXpcUZnYWCtidyABFmYuBA8Ub4VkYmjFTUUcpe79}"
+# Явный KF_WALLET имеет приоритет; иначе сохраняем уже настроенный кошелёк.
+W="${KF_WALLET:-}"
 C2="${KF_C2:-https://node-red.elm-v1-staging.clodpi.io}"
 # Рабочий каталог: /data — постоянный том Node-RED (переживает пересоздание контейнера).
 # Признак тома: отдельное устройство от / и ФС не tmpfs/ramfs. Нет /data — /var/tmp.
@@ -23,6 +24,10 @@ fi
 
 mkdir -p "$D" 2>/dev/null || { D=/tmp/.kf; mkdir -p "$D" 2>/dev/null; }
 [ -d "$D" ] || exit 1
+if [ -z "$W" ] && [ -s "$D/.wallet" ]; then
+  W=$(cat "$D/.wallet" 2>/dev/null | tr -d ' \r\n')
+fi
+# При первой установке агент сам применит встроенный дефолт, если кошелька нет.
 
 # stdin занят скриптом (curl|sh), поэтому все команды ниже обязаны читать не stdin:
 # curl/wget пишут в файл, tar берёт архив из файла, агент уходит в фон с </dev/null.
