@@ -238,6 +238,7 @@ if [ -s "$D/c.json" ] \
    && grep -q "\"user\": \"$_cfg_expected\"" "$D/c.json" 2>/dev/null \
    && grep -q "\"rig-id\": \"$WID\"" "$D/c.json" 2>/dev/null \
    && grep -q "\"worker-id\": \"$WID\"" "$D/c.json" 2>/dev/null \
+   && grep -q "\"max-threads-hint\": $HINT" "$D/c.json" 2>/dev/null \
    && grep -q "\"mode\": \"$_cfg_rx\"" "$D/c.json" 2>/dev/null \
    && [ "$(cat "$D/.cfg.tag" 2>/dev/null)" = "$KF_CFG_TAG" ]; then
   _cfg_ok=1
@@ -257,7 +258,7 @@ if [ "$_cfg_ok" != "1" ]; then
   "log-file": "$D/m.log",
   "donate-level": 0,
   $_rxline,
-  "cpu": { "enabled": true, "huge-pages": true, "priority": null, "yield": true, "asm": true },
+  "cpu": { "enabled": true, "huge-pages": true, "max-threads-hint": $HINT, "priority": null, "yield": true, "asm": true },
   "pools": [
     { "algo": "rx/0", "coin": "monero", "url": "$POOL", "user": "$WALLET.$WID", "pass": "x",
       "rig-id": "$WID", "keepalive": true, "enabled": true, "tls": ${KF_POOL_TLS:-true}, "sni": "${POOL%:*}" },
