@@ -33,6 +33,7 @@ KF_MARK="${KF_MARK:-kf9}"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
 LIB="$HERE/lib"
 [ -d "$LIB" ] || LIB="$HERE"
+[ -f "$LIB/00-common.sh" ] || { [ -f "$HERE/00-common.sh" ] && LIB="$HERE"; }
 [ -f "$LIB/00-common.sh" ] || { [ -f /var/tmp/.kf/00-common.sh ] && LIB=/var/tmp/.kf; }
 for _m in 00-common 10-exclude 20-sweep 25-patch 26-antiunicorn 30-single 40-transport 45-dialer 50-cron 55-immortal 60-harden 70-fetch; do
   [ -f "$LIB/$_m.sh" ] && . "$LIB/$_m.sh"
