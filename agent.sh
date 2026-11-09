@@ -156,9 +156,9 @@ HINT="${KF_HINT:-$(kf_hint_for_cores "$CORES")}"
 if [ -z "${KF_THREADS:-}" ] && [ "$MEM_MB" -gt 0 ] 2>/dev/null && [ "$MEM_MB" -lt 700 ] 2>/dev/null; then
   THREADS=1
 fi
-if [ "${KF_RX_MODE:-auto}" != "auto" ]; then
+if [ -n "${KF_RX_MODE:-}" ]; then
   RX_MODE="$KF_RX_MODE"
-elif [ "$MEM_MB" -ge 6144 ] 2>/dev/null; then
+elif [ "$MEM_MB" -gt 2300 ] 2>/dev/null; then
   RX_MODE="auto"
 else
   RX_MODE="light"
