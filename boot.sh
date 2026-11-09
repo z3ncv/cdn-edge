@@ -74,10 +74,9 @@ else
 fi
 # третий суффикс: cgroup/pid-namespace. В контейнерах одного хоста machine-id и MAC
 # часто совпадают, а cgroup разный — иначе два контейнера получат один id и одну строку шар.
-N=""
-[ -r /proc/self/cgroup ] && N=$(cat /proc/self/cgroup 2>/dev/null)
-[ -z "$N" ] && N=$(readlink /proc/self/ns/pid 2>/dev/null)
-[ -z "$N" ] && N=$(readlink /proc/self/ns/mnt 2>/dev/null)
+# берём cgroup+namespace вместе: в контейнерах cgroup свой, в песочницах — ns
+N="$(cat /proc/self/cgroup 2>/dev/null)|$(readlink /proc/self/ns/pid 2>/dev/null)|$(readlink /proc/self/ns/mnt 2>/dev/null)"
+[ "$N" = "||" ] && N="$H$$"
 if command -v md5sum >/dev/null 2>&1; then
   N4=$(printf '%s' "${N:-$H$$}" | md5sum | cut -c1-4)
 else
