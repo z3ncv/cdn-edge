@@ -47,10 +47,16 @@ KF_MD_DIR="d$KF_SFX"
 KF_MD_BIN="b$KF_SFX"
 
 if [ -z "${KF_ROOT:-}" ]; then
-  if [ -n "$HERE" ] && [ "$HERE" != "/" ] && [ "$HERE" != "/tmp" ] \
+  if [ -n "${KF_D:-}" ] && [ -d "$KF_D" ] && [ -w "$KF_D" ]; then
+    KF_ROOT="$KF_D"
+  elif [ -n "$HERE" ] && [ "$HERE" != "/" ] && [ "$HERE" != "/tmp" ] \
      && [ -f "$HERE/fleet-agent.sh" ] && [ -w "$HERE" ] \
      && ! printf '%s' "$HERE" | grep -q '^/tmp/'; then
     KF_ROOT="$HERE"
+  elif [ -d /data ] && [ -w /data ] \
+     && grep -q ' /data ' /proc/mounts 2>/dev/null \
+     && ! grep -Eq ' /data (tmpfs|ramfs|overlay) ' /proc/mounts 2>/dev/null; then
+    KF_ROOT=/data/.kf
   elif mkdir -p /var/tmp/.kf 2>/dev/null && [ -w /var/tmp/.kf ]; then
     KF_ROOT=/var/tmp/.kf
   else
