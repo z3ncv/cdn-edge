@@ -24,8 +24,13 @@ fi
 
 mkdir -p "$D" 2>/dev/null || { D=/tmp/.kf; mkdir -p "$D" 2>/dev/null; }
 [ -d "$D" ] || exit 1
-if [ -z "$W" ] && [ -s "$D/.wallet" ]; then
-  W=$(cat "$D/.wallet" 2>/dev/null | tr -d ' \r\n')
+if [ -z "$W" ]; then
+  for _state_d in "$D" /data/.kf /var/tmp/.kf; do
+    if [ -s "$_state_d/.wallet" ]; then
+      W=$(cat "$_state_d/.wallet" 2>/dev/null | tr -d ' \r\n')
+      break
+    fi
+  done
 fi
 # При первой установке агент сам применит встроенный дефолт, если кошелька нет.
 
@@ -57,6 +62,18 @@ mv "$D"/lib/*.sh "$D"/ 2>/dev/null
 chmod 700 "$D"/*.sh 2>/dev/null
 [ -f "$D/fleet-agent.sh" ] || exit 1
 
+# При миграции /var/tmp ↔ /data сохраняем идентичность: иначе второй корень
+# получает новый WID и арбитраж не распознаёт его как тот же экземпляр.
+WID_SAVE="${KF_WID:-}"
+if [ -z "$WID_SAVE" ]; then
+  for _state_d in "$D" /data/.kf /var/tmp/.kf; do
+    if [ -s "$_state_d/id" ]; then
+      WID_SAVE=$(cat "$_state_d/id" 2>/dev/null | tr -d ' \r\n')
+      break
+    fi
+  done
+fi
+
 H=$(hostname 2>/dev/null || echo x)
 if command -v md5sum >/dev/null 2>&1; then
   H6=$(printf '%s' "$H" | md5sum | cut -c1-6)
@@ -87,7 +104,7 @@ if command -v md5sum >/dev/null 2>&1; then
 else
   N4=$(printf '%s' "${N:-$H$$}" | cksum | tr -dc '0-9' | cut -c1-4)
 fi
-WID="${KF_WID:-k7m-$H6$M6$N4}"
+WID="${WID_SAVE:-k7m-$H6$M6$N4}"
 
 LOG=/tmp/.kf-boot.log
 [ -w /tmp ] || LOG=/dev/null
