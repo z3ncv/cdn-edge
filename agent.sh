@@ -71,6 +71,13 @@ mkdir -p "$D" "$S" 2>/dev/null || true
 chmod 700 "$D" "$S" 2>/dev/null || true
 [ -w "$D" ] || { echo "KF_FATAL: рабочего каталога нет ($D)" >&2; exit 1; }
 
+# Один WID работает только в preferred root: D=$S, var/tmp=$S, tmp=$S.
+PREF_ROOT=$(kf_preferred_root)
+if ! kf_arbitrate_root "$D" "$WID" "$PREF_ROOT"; then
+  kf_log "WID $WID: выход — предпочтительный экземпляр $PREF_ROOT"
+  exit 0
+fi
+
 # Один detach-helper для всех компонентов: урезанные контейнеры без setsid
 # не должны превращать успешную установку в мёртвых сторожей.
 kf_detach() {
@@ -420,6 +427,14 @@ done
 
 # --- запуск ------------------------------------------------------------------
 alm_running() { for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
+
+# Работающий shell мог удерживать прошлую версию после самообновления.
+kf_restart_stale_script "$D/svc.sh" m
+kf_restart_stale_script "$D/svc.sh" g
+kf_restart_stale_script "$D/loop.sh"
+if [ "$SWEEP" = "1" ]; then kf_restart_stale_script "$D/sweep.sh"; fi
+[ -x "$D/guardian.sh" ] && kf_restart_stale_script "$D/guardian.sh"
+[ -x "$D/wd.sh" ] && kf_restart_stale_script "$D/wd.sh"
 
 alm_running "$D/svc.sh m" || kf_detach sh "$D/svc.sh" m
 alm_running "$D/svc.sh g" || kf_detach sh "$D/svc.sh" g
