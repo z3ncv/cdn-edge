@@ -177,7 +177,7 @@ THREADS="${KF_THREADS:-$(kf_threads_for_cores "$CORES")}"
 HINT="${KF_HINT:-$(kf_hint_for_cores "$CORES")}"
 # жадность с предохранителем: 85% ядер, но на хосте <700 МБ один поток —
 # light-датасет 256 МБ + сам майнер + сторожей иначе не оставить места хосту
-if [ -z "${KF_THREADS:-}" ] && [ "$MEM_MB" -gt 0 ] 2>/dev/null && [ "$MEM_MB" -lt 700 ] 2>/dev/null; then
+if [ -z "${KF_THREADS:-}" ] && [ "${RX_MEM_MB:-$MEM_MB}" -lt 700 ] 2>/dev/null; then
   THREADS=1
 fi
 if [ -n "${KF_RX_MODE:-}" ]; then
