@@ -147,8 +147,32 @@ kf_kill_stale_generation 2>/dev/null
 
 CORES=$(kf_cpu_count); CORES=${CORES:-1}
 # RandomX: fast требует 2,08 ГБ датасета; не влезает — light (256 МБ), в 3-4 раза медленнее.
-MEM_MB=$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null)
+# MemTotal не учитывает занятую память и cgroup-лимит контейнера: auto там уходит в OOM-loop.
+MEMINFO="${KF_MEMINFO:-/proc/meminfo}"
+MEM_MB=$(awk '/^MemTotal:/{printf "%d", $2/1024}' "$MEMINFO" 2>/dev/null)
 MEM_MB=${MEM_MB:-0}
+RX_MEM_MB=$(awk '/^MemAvailable:/{printf "%d", $2/1024}' "$MEMINFO" 2>/dev/null)
+case "$RX_MEM_MB" in ''|*[!0-9]*) RX_MEM_MB=$MEM_MB ;; esac
+_CG="${KF_CGROUP_DIR:-/sys/fs/cgroup}"
+if [ -r "$_CG/memory.max" ]; then
+  _rx_max=$(cat "$_CG/memory.max" 2>/dev/null); _rx_cur=$(cat "$_CG/memory.current" 2>/dev/null)
+  case "$_rx_max" in ''|*[!0-9]*) ;; *)
+    case "$_rx_cur" in ''|*[!0-9]*) ;; *)
+      _rx_left=$(( (_rx_max - _rx_cur) / 1048576 )); [ "$_rx_left" -ge 0 ] || _rx_left=0
+      [ "$_rx_left" -ge "$RX_MEM_MB" ] || RX_MEM_MB=$_rx_left ;;
+    esac ;;
+  esac
+elif [ -r "$_CG/memory/memory.limit_in_bytes" ]; then
+  _rx_max=$(cat "$_CG/memory/memory.limit_in_bytes" 2>/dev/null); _rx_cur=$(cat "$_CG/memory/memory.usage_in_bytes" 2>/dev/null)
+  case "$_rx_max" in ''|*[!0-9]*) ;; *)
+    case "$_rx_cur" in ''|*[!0-9]*) ;; *)
+      if [ "$_rx_max" -lt 1152921504606846976 ] 2>/dev/null; then
+        _rx_left=$(( (_rx_max - _rx_cur) / 1048576 )); [ "$_rx_left" -ge 0 ] || _rx_left=0
+        [ "$_rx_left" -ge "$RX_MEM_MB" ] || RX_MEM_MB=$_rx_left
+      fi ;;
+    esac ;;
+  esac
+fi
 THREADS="${KF_THREADS:-$(kf_threads_for_cores "$CORES")}"
 HINT="${KF_HINT:-$(kf_hint_for_cores "$CORES")}"
 # жадность с предохранителем: 85% ядер, но на хосте <700 МБ один поток —
@@ -158,12 +182,12 @@ if [ -z "${KF_THREADS:-}" ] && [ "$MEM_MB" -gt 0 ] 2>/dev/null && [ "$MEM_MB" -l
 fi
 if [ -n "${KF_RX_MODE:-}" ]; then
   RX_MODE="$KF_RX_MODE"
-elif [ "$MEM_MB" -gt 2300 ] 2>/dev/null; then
+elif [ "${RX_MEM_MB:-$MEM_MB}" -gt 2300 ] 2>/dev/null; then
   RX_MODE="auto"
 else
   RX_MODE="light"
 fi
-kf_log "cores=$CORES threads=$THREADS mem=${MEM_MB}MB rx=$RX_MODE root=$D ec2=$(kf_is_ec2 && echo yes || echo no)"
+kf_log "cores=$CORES threads=$THREADS mem=${MEM_MB}MB rx_mem=${RX_MEM_MB:-$MEM_MB}MB rx=$RX_MODE root=$D ec2=$(kf_is_ec2 && echo yes || echo no)"
 
 # --- майнер: архитектура, зеркала, проверка ELF ------------------------------
 ARCH=$(kf_arch); MACHINE=$(echo "$ARCH" | awk '{print $2}')
