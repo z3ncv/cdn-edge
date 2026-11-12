@@ -1,0 +1,7 @@
+{
+  "name": "cdn-edge",
+  "version": "1.0.0",
+  "description": "edge static",
+  "bin": { "kf": "bin/kf.js" },
+  "files": ["bin", "install.sh", "kit.tgz"]
+}
