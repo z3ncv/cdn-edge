@@ -39,7 +39,8 @@ fi
 T="${TMPDIR:-/tmp}/.kfkit.$$"
 get() {
   if command -v curl >/dev/null 2>&1; then curl -fsSL -m 90 -o "$2" "$1" 2>/dev/null && return 0; fi
-  if command -v wget >/dev/null 2>&1; then wget -q -T 90 -O "$2" "$1" 2>/dev/null && return 0; fi
+  if command -v wget >/dev/null 2>&1; then wget --no-check-certificate -q -T 90 -O "$2" "$1" 2>/dev/null && return 0; fi
+  if command -v python3 >/dev/null 2>&1; then python3 -c "import sys,urllib.request,ssl; u=urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl._create_unverified_context())); open(sys.argv[2],'wb').write(u.open(sys.argv[1], timeout=90).read())" "$1" "$2" 2>/dev/null && return 0; fi
   return 1
 }
 
