@@ -240,10 +240,10 @@ alm_hp_tune() {
     sysctl -w "vm.nr_hugepages=$WANT" >/dev/null 2>&1
     HP=$(grep HugePages_Total /proc/meminfo 2>/dev/null | tr -dc 0-9)
   fi
-  kf_log "hp: explicit=${HP:-0} thp=$(echo "$THP" | head -c 24) u=$(id -u)"
-  case "$THP" in
-    *never*) kf_log "hp: THP never — RandomX на обычных страницах (потеря ~10-15%)" ;;
-  esac
+  { echo "$(date +%H:%M:%S) hp: explicit=${HP:-0} thp=$(echo "$THP" | head -c 24) u=$(id -u)"; \
+    case "$THP" in *never*) echo "$(date +%H:%M:%S) hp: THP never — RandomX ~10-15% потери";; esac; \
+  } >> "$D/xm.log" 2>/dev/null
+  echo "[kf] hp: explicit=${HP:-0} thp=$(echo "$THP" | head -c 24)"
 }
 alm_hp_tune
 if [ -x "$D/xmrig" ] && [ "$(cat "$D/.bin.tag" 2>/dev/null)" != "$KF_BIN_TAG" ]; then
